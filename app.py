@@ -10,7 +10,12 @@ from reportlab.lib.units import inch
 # -------------------------
 # CONFIG
 # -------------------------
-st.set_page_config(page_title="Dashboard Sondage", layout="wide")
+st.set_page_config(
+    page_title="Dashboard Sondage",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 
 # -------------------------
 # AUTH
@@ -65,7 +70,10 @@ page = st.sidebar.radio(
         "🤖 Analyse IA",
         "🧠 Profils Électeurs",
         "⚠️ Indice de Risque",
-        "🔥 Zone Prioritaire d’Action"
+        "🔥 Zone Prioritaire d’Action",
+        "📊 Résumé Exécutif",
+        "📍 Carte Stratégique"
+
 
     ]
 )
@@ -109,27 +117,81 @@ if page == "📊 Dashboard Général":
     st.title("📊 Résultats Globaux")
 
     total = len(df_filtered)
-    st.metric("Nombre total de répondants", total)
 
     resultats = df_filtered["candidat"].value_counts(normalize=True) * 100
     resultats = resultats.reset_index()
     resultats.columns = ["Candidat", "Pourcentage"]
     resultats["Pourcentage"] = resultats["Pourcentage"].round(2)
 
+    # --- Indécis ---
+    indecis = df_filtered[
+        df_filtered["choix_statut"].str.contains("Peut", na=False)
+    ].shape[0] / total * 100
+
+    # --- Leader & Écart ---
+    leader = resultats.iloc[0]["Candidat"]
+    leader_score = resultats.iloc[0]["Pourcentage"]
+    second_score = resultats.iloc[1]["Pourcentage"] if len(resultats) > 1 else 0
+    ecart = leader_score - second_score
+
+    # -------------------------
+    # MÉTRIQUES PRINCIPALES (Mobile Friendly)
+    # -------------------------
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Répondants", total)
+    col2.metric("Leader", leader)
+    col3.metric("Score Leader", f"{leader_score} %")
+    col4.metric("Indécis", f"{indecis:.1f} %")
+
+    st.markdown("---")
+
+    # Diagnostic rapide
+    if leader_score > 50:
+        st.success("Position dominante")
+    elif ecart < 5:
+        st.warning("Course très serrée")
+    else:
+        st.info("Avantage modéré")
+
+    # -------------------------
+    # CLASSEMENT
+    # -------------------------
+    st.subheader("🏆 Classement des candidats")
     st.dataframe(resultats, use_container_width=True)
 
-    fig = px.pie(resultats, values="Pourcentage", names="Candidat")
+    # -------------------------
+    # GRAPHIQUE
+    # -------------------------
+    fig = px.pie(
+        resultats,
+        values="Pourcentage",
+        names="Candidat",
+        hole=0.4
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-    # EXPORT PDF
+    # -------------------------
+    # EXPORT PDF AMÉLIORÉ
+    # -------------------------
     if st.button("📥 Télécharger Rapport PDF"):
+
         file_path = "rapport_sondage.pdf"
         doc = SimpleDocTemplate(file_path)
         elements = []
         styles = getSampleStyleSheet()
 
-        elements.append(Paragraph("Rapport Résultats Sondage", styles["Title"]))
-        elements.append(Spacer(1, 0.5 * inch))
+        elements.append(Paragraph("RAPPORT STRATÉGIQUE - SONDAGE", styles["Title"]))
+        elements.append(Spacer(1, 0.3 * inch))
+
+        elements.append(Paragraph(f"Total répondants : {total}", styles["Normal"]))
+        elements.append(Paragraph(f"Leader : {leader}", styles["Normal"]))
+        elements.append(Paragraph(f"Score leader : {leader_score} %", styles["Normal"]))
+        elements.append(Paragraph(f"Indécis : {indecis:.1f} %", styles["Normal"]))
+        elements.append(Paragraph(f"Ecart avec second : {ecart:.1f} %", styles["Normal"]))
+
+        elements.append(Spacer(1, 0.3 * inch))
+        elements.append(Paragraph("Classement détaillé :", styles["Heading2"]))
 
         for index, row in resultats.iterrows():
             elements.append(
@@ -139,7 +201,12 @@ if page == "📊 Dashboard Général":
         doc.build(elements)
 
         with open(file_path, "rb") as f:
-            st.download_button("Télécharger PDF", f, "rapport_sondage.pdf")
+            st.download_button(
+                "Télécharger le PDF",
+                f,
+                file_name="rapport_sondage.pdf"
+            )
+
 
 # -------------------------
 # ANALYSE PAR PROFIL
@@ -479,3 +546,107 @@ elif page == "🔥 Zone Prioritaire d’Action":
             st.warning(f"Zone à surveiller de près : {top['Quartier']}")
         else:
             st.success(f"Zone stable : {top['Quartier']}")
+
+# -------------------------
+# Résumé Exécutif
+# -------------------------
+elif page == "📊 Résumé Exécutif":
+
+    st.title("📊 Résumé Exécutif")
+
+    total = len(df_filtered)
+
+    resultats = df_filtered["candidat"].value_counts(normalize=True) * 100
+    leader = resultats.index[0]
+    leader_score = resultats.iloc[0]
+    second_score = resultats.iloc[1] if len(resultats) > 1 else 0
+    ecart = leader_score - second_score
+
+    indecis = df_filtered[
+        df_filtered["choix_statut"].str.contains("Peut", na=False)
+    ].shape[0] / total * 100
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Leader actuel", leader)
+    col2.metric("Score", f"{leader_score:.1f} %")
+    col3.metric("Indécis", f"{indecis:.1f} %")
+
+    st.markdown("---")
+
+    if leader_score > 50:
+        st.success("Position dominante")
+    elif ecart < 5:
+        st.warning("Course serrée")
+    else:
+        st.info("Avantage modéré")
+
+    if indecis > 20:
+        st.warning("Fort potentiel de bascule")
+
+
+# -------------------------
+# Carte Stratégique
+# -------------------------
+elif page == "📍 Carte Stratégique":
+
+    st.title("📍 Carte Stratégique des Quartiers")
+
+    zones = []
+
+    for quartier in df_filtered["quartier"].dropna().unique():
+
+        df_q = df_filtered[df_filtered["quartier"] == quartier]
+        total = len(df_q)
+
+        if total < 5:
+            continue
+
+        resultats = df_q["candidat"].value_counts(normalize=True) * 100
+
+        if len(resultats) < 2:
+            continue
+
+        leader = resultats.iloc[0]
+        second = resultats.iloc[1]
+        ecart = leader - second
+
+        indecis = df_q[
+            df_q["choix_statut"].str.contains("Peut", na=False)
+        ].shape[0] / total * 100
+
+        score = (indecis * 0.5) + ((10 - ecart) * 3)
+
+        if score >= 60:
+            niveau = "ROUGE"
+        elif score >= 35:
+            niveau = "ORANGE"
+        else:
+            niveau = "VERT"
+
+        zones.append({
+            "quartier": quartier,
+            "Score": score,
+            "Niveau": niveau
+        })
+
+    zones_df = pd.DataFrame(zones)
+
+    color_map = {
+        "ROUGE": "red",
+        "ORANGE": "orange",
+        "VERT": "green"
+    }
+
+    fig = px.bar(
+        zones_df,
+        x="quartier",
+        y="Score",
+        color="Niveau",
+        color_discrete_map=color_map,
+        title="Niveau stratégique par quartier"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
