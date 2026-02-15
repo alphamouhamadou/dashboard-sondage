@@ -1,0 +1,4 @@
+.streamlit/
+rapport_sondage.pdf
+__pycache__/
+*.pyc
